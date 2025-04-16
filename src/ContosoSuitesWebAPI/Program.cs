@@ -8,8 +8,19 @@ using Microsoft.Data.SqlClient;
 using Azure.AI.OpenAI;
 using Azure;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
+using Microsoft.SemanticKernel.ChatCompletion;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Add configuration sources: user secrets and environment variables
+var config = new ConfigurationBuilder()
+    .AddUserSecrets<Program>()
+    .AddEnvironmentVariables()
+    .Build();
+
+// Optionally: Validate configuration here, e.g. check required keys
 
 // Add services to the container.
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -55,6 +66,20 @@ builder.Services.AddSingleton<AzureOpenAIClient>((_) =>
     return client;
 });
 
+// Create a singleton of Microsoft.SemanticKernel.Kernel
+builder.Services.AddSingleton<Kernel>((_) =>
+{
+    IKernelBuilder kernelBuilder = Kernel.CreateBuilder();
+    kernelBuilder.AddAzureOpenAIChatCompletion(
+        deploymentName: builder.Configuration["AzureOpenAI:DeploymentName"]!,
+        endpoint: builder.Configuration["AzureOpenAI:Endpoint"]!,
+        apiKey: builder.Configuration["AzureOpenAI:ApiKey"]!
+    );
+    var databaseService = _.GetRequiredService<IDatabaseService>();
+    kernelBuilder.Plugins.AddFromObject(databaseService);
+    return kernelBuilder.Build();
+});
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -78,8 +103,7 @@ app.MapGet("/", async () =>
 // Retrieve the set of hotels from the database.
 app.MapGet("/Hotels", async () => 
 {
-    var hotels = await app.Services.GetRequiredService<IDatabaseService>().GetHotels();
-    return hotels;
+    throw new NotImplementedException();
 })
     .WithName("GetHotels")
     .WithOpenApi();
@@ -87,8 +111,7 @@ app.MapGet("/Hotels", async () =>
 // Retrieve the bookings for a specific hotel.
 app.MapGet("/Hotels/{hotelId}/Bookings/", async (int hotelId) => 
 {
-    var bookings = await app.Services.GetRequiredService<IDatabaseService>().GetBookingsForHotel(hotelId);
-    return bookings;
+    throw new NotImplementedException();
 })
     .WithName("GetBookingsForHotel")
     .WithOpenApi();
@@ -96,8 +119,7 @@ app.MapGet("/Hotels/{hotelId}/Bookings/", async (int hotelId) =>
 // Retrieve the bookings for a specific hotel that are after a specified date.
 app.MapGet("/Hotels/{hotelId}/Bookings/{min_date}", async (int hotelId, DateTime min_date) => 
 {
-    var bookings = await app.Services.GetRequiredService<IDatabaseService>().GetBookingsByHotelAndMinimumDate(hotelId, min_date);
-    return bookings;
+    throw new NotImplementedException();
 })
     .WithName("GetRecentBookingsForHotel")
     .WithOpenApi();
@@ -106,8 +128,14 @@ app.MapGet("/Hotels/{hotelId}/Bookings/{min_date}", async (int hotelId, DateTime
 app.MapPost("/Chat", async Task<string> (HttpRequest request) =>
 {
     var message = await Task.FromResult(request.Form["message"]);
-    
-    return "This endpoint is not yet available.";
+    var kernel = app.Services.GetRequiredService<Kernel>();
+    var chatCompletionService = kernel.GetRequiredService<IChatCompletionService>();
+    var executionSettings = new OpenAIPromptExecutionSettings
+    {
+        ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
+    };
+    var response = await chatCompletionService.GetChatMessageContentAsync(message.ToString(), executionSettings, kernel);
+    return response?.Content!;
 })
     .WithName("Chat")
     .WithOpenApi();
